@@ -1,8 +1,14 @@
 package model
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"sync"
+	"time"
 )
 
 type Session interface {
@@ -47,4 +53,61 @@ func NewSessionManager(providerName, cookieName string, maxLifeTime int64) (*Ses
 		maxLifeTime: maxLifeTime,
 		provider:    provider,
 	}, nil
+}
+func (manager *SessionManager) GetSessionId() string {
+	b := make([]byte, 32)
+	if _, error := io.ReadFull(rand.Reader, b); error != nil {
+		return ""
+	}
+	return base64.URLEncoding.EncodeToString(b)
+}
+
+func (manager *SessionManager) SessionBegin(w http.ResponseWriter, r *http.Request) (session Session) {
+	manager.lock.Lock()
+	defer manager.lock.Unlock()
+	cookie, err := r.Cookie(manager.cookieName)
+	if err != nil || cookie.Value == "" {
+		sessionId := manager.GetSessionId()
+		session, _ = manager.provider.SessionInit(sessionId)
+		cookie := http.Cookie{
+			Name:     manager.cookieName,
+			Value:    url.QueryEscape(sessionId),
+			Path:     "/",
+			HttpOnly: true,
+			MaxAge:   int(manager.maxLifeTime),
+		}
+		http.SetCookie(w, &cookie)
+	} else {
+		sessionId, _ := url.QueryUnescape(cookie.Value)
+		session, _ = manager.provider.SessionRead(sessionId)
+	}
+	return session
+}
+
+func (manager *SessionManager) SessionDestroy(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(manager.cookieName)
+	if err != nil || cookie.Value == "" {
+		return
+	}
+	manager.lock.Lock()
+	defer manager.lock.Unlock()
+	manager.provider.SessionDestroy(cookie.Value)
+	expiredTime := time.Now()
+	newCookie := http.Cookie{
+		Name:     manager.cookieName,
+		Path:     "/",
+		HttpOnly: true,
+		Expires:  expiredTime,
+		MaxAge:   -1,
+	}
+	http.SetCookie(w, &newCookie)
+}
+
+func (manager *SessionManager) GarbageCollector() {
+	manager.lock.Lock()
+	defer manager.lock.Unlock()
+	manager.provider.GarbageCollector(manager.maxLifeTime)
+	time.AfterFunc(time.Duration(manager.maxLifeTime), func() {
+		manager.GarbageCollector()
+	})
 }
