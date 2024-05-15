@@ -6,7 +6,7 @@ type ExecTime struct {
 }
 type LogRecord struct {
 	JobName string `bson:"jobName"`
-	Command string `bson:command`
-	Err     string `bson:err`
+	Command string `bson:"command"`
+	Err     string `bson:"err"`
 	Tp      ExecTime
 }
