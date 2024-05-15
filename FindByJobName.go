@@ -1,5 +1,5 @@
 package model
 
 type FindMyJobName struct {
-	JobName string `bson:"jobName1"`
+	JobName string `bson:"jobName"`
 }
